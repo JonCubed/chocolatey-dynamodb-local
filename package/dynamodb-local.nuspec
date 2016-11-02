@@ -39,7 +39,7 @@ This is a nuspec. It mostly adheres to https://docs.nuget.org/create/Nuspec-Refe
     <authors>Amazon Web Services</authors>
     <!-- projectUrl is required for the community feed -->
     <projectUrl>http://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html</projectUrl>
-    <!--<iconUrl>http://cdn.rawgit.com/__REPLACE_YOUR_REPO__/master/icons/dynamodb-local.png</iconUrl>-->
+    <iconUrl>https://cdn.rawgit.com/JonCubed/chocolatey-dynamodb-local/4c7663968da8a26d4b322a0995d41ecc06c7d394/package/AmazonDynamoDB_Icon.svg</iconUrl>
     <!-- <copyright>Year Software Vendor</copyright> -->
     <!-- If there is a license Url available, it is is required for the community feed -->
     <!-- <licenseUrl>Software License Location __REMOVE_OR_FILL_OUT__</licenseUrl>
