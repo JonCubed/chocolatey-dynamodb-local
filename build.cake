@@ -1,4 +1,4 @@
-#addin "Cake.FileHelpers"
+#addin "Cake.Json"
 
 #reference "System.Net"
 #reference "System.Net.Http"
@@ -8,12 +8,34 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.RegularExpressions;
 
-string CurrentVersion = string.Empty;
+class BuildState {
+    public string Version { get; set; }
+}
+
+bool GracefullyAbort;
 string LatestVersion = string.Empty;
-string Hash = null;
 Uri LatestZip = null;
+BuildState State = null;
+
+
+Task("Load State")
+    .Does(() =>
+    {
+        if(!FileExists("./state.json")) {
+            Information("No State file was found");
+            State = new BuildState();
+            return;
+        }
+
+        State = DeserializeJsonFromFile<BuildState>("./state.json");
+
+        Information("State loaded");
+        Information($"Version: {State.Version}");
+    })
+;
 
 Task("Check Latest")
+    .IsDependentOn("Load State")
     .Does( context =>
     {
         var httpClientHandler = new HttpClientHandler
@@ -52,53 +74,48 @@ Task("Check Latest")
 
             LatestVersion = $"{version.Groups["year"]}.{version.Groups["month"]}.{version.Groups["day"]}";
             Information($"Latest version: {LatestVersion}");
+
+            if (State.Version == LatestVersion) {
+                Warning("Current version is the latest version");
+                GracefullyAbort = true;
+            }
         }
     })
 ;
 
-Task("Get Latest Hash")
+Task("Run Pack")
+    .WithCriteria( () => !GracefullyAbort )
     .IsDependentOn("Check Latest")
-    .WithCriteria(() => !string.IsNullOrEmpty(LatestVersion) && CurrentVersion != LatestVersion)
     .Does(() =>
     {
-        var resource = DownloadFile(LatestZip);
+        CakeExecuteScript("./pack.cake", new CakeSettings {
+            Arguments = new Dictionary<string, string>
+            {
+                { "latestUrl", LatestZip.ToString() },
+                { "packageVersion", LatestVersion }
+            }
+            ,ArgumentCustomization = builder => {
+                builder.Append("-experimental");
+                return builder;
+            }
+        });
+    });
 
-        Hash = CalculateFileHash(resource.FullPath).ToHex();
-        Information($"Zip file SHA256 hash: {Hash}");
-    })
-;
-
-Task("Setup Package")
-    .IsDependentOn("Get Latest Hash")
+Task("Save State")
+    .WithCriteria( () => !GracefullyAbort )
+    .IsDependentOn("Run Pack")
     .Does(() =>
     {
-        Information("Cleaning temp directory");
-        CleanDirectory("./temp/package");
+        State.Version = LatestVersion;
 
-        Information("Setup package files");
-        CopyDirectory("./package","./temp/package");
-
-        DeleteFiles("./temp/package/*.ignore");
-        DeleteFiles("./temp/package/tools/*.ignore");
-    })
-;
-
-Task("Replace Tokens")
-    .IsDependentOn("Setup Package")
-    .Does(() =>
-    {
-        Information($"Replacing [URL] with '{LatestZip.ToString()}'");
-        ReplaceTextInFiles("./temp/package/tools/*.ps1", "[URL]", LatestZip.ToString());
-
-        Information($"Replacing [CHECKSUM] with '{Hash}'");
-        ReplaceTextInFiles("./temp/package/tools/*.ps1", "[CHECKSUM]", Hash);
+        SerializeJsonToFile("./state.json", State);
     })
 ;
 
 Task("Default")
-    .IsDependentOn("Pack")
+    .IsDependentOn("Save State")
     .Does( () => {
-        Information($"Current Version: {CurrentVersion}");
+        Information($"Current Version: {State.Version}");
         Information($"Latest Version: {LatestVersion}");
         Information($"Latest Zip: {LatestZip}");
     })
@@ -106,48 +123,6 @@ Task("Default")
     {
         Warning("Error is being handled.");
     });
-;
-
-Task("Pack")
-    .IsDependentOn("Replace Tokens")
-    .Does(() =>
-    {
-        var chocolateyPackSettings   = new ChocolateyPackSettings
-        {
-            // Id                      = "TestChocolatey",
-            // Title                   = "The tile of the package",
-            Version                 = LatestVersion,
-            // Authors                 = new[] {"Amazon"},
-            // Owners                  = new[] {"Jonathan Kuleff"},
-            // Summary                 = "Excellent summary of what the package does",
-            // Description             = "The description of the package",
-            // ProjectUrl              = new Uri("https://github.com/SomeUser/TestChocolatey/"),
-            // PackageSourceUrl        = new Uri("https://github.com/SomeUser/TestChocolatey/"),
-            // ProjectSourceUrl        = new Uri("https://github.com/SomeUser/TestChocolatey/"),
-            // DocsUrl                 = new Uri("https://github.com/SomeUser/TestChocolatey/"),
-            // MailingListUrl          = new Uri("https://github.com/SomeUser/TestChocolatey/"),
-            // BugTrackerUrl           = new Uri("https://github.com/SomeUser/TestChocolatey/"),
-            // Tags                    = new [] {"Cake", "Script", "Build"},
-            // Copyright               = "Some company 2015",
-            // LicenseUrl              = new Uri("https://github.com/SomeUser/TestChocolatey/blob/master/LICENSE.md"),
-            // RequireLicenseAcceptance= false,
-            // IconUrl                 = new Uri("http://cdn.rawgit.com/SomeUser/TestChocolatey/master/icons/testchocolatey.png"),
-            //ReleaseNotes            = new [] {"Bug fixes", "Issue fixes", "Typos"},
-            // Files                   = new [] {
-                                                //  new ChocolateyNuSpecContent {Source = "bin/TestChocolatey.dll", Target = "bin"},
-                                            //   },
-            // Debug                   = false,
-            // Verbose                 = false,
-            // Force                   = false,
-            // Noop                    = false,
-            // LimitOutput             = false,
-            // ExecutionTimeout        = 13,
-            // CacheLocation           = @"C:\temp",
-            //AllowUnofficial          = false
-        };
-
-        ChocolateyPack("./temp/package/dynamodb-local.nuspec", chocolateyPackSettings);
-    })
 ;
 
 RunTarget("Default");
