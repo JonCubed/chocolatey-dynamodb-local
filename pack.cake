@@ -1,21 +1,10 @@
 #addin "Cake.FileHelpers"
 
-var UrlToLatestZip = Argument<string>("latestUrl");
-var LatestVersion = Argument<string>("packageVersion");
-string Hash;
-
-Task("Get Latest Hash")
-    .Does(() =>
-    {
-        var resource = DownloadFile(UrlToLatestZip);
-
-        Hash = CalculateFileHash(resource.FullPath).ToHex();
-        Information($"Zip file SHA256 hash: {Hash}");
-    })
-;
+var UrlToLatestZip  = Argument<string>("latestUrl");
+var LatestVersion   = Argument<string>("packageVersion");
+var Hash            = Argument<string>("latestHash");
 
 Task("Setup Package")
-    .IsDependentOn("Get Latest Hash")
     .Does(() =>
     {
         Information("Cleaning temp directory");

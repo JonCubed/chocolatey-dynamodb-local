@@ -8,15 +8,19 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.RegularExpressions;
 
+bool GracefullyAbort;
+Uri LatestZip = null;
+var Force = HasArgument("Force");
+var SkipHash = HasArgument("SkipHash");
+
+BuildState State = null;
+string LatestVersion = string.Empty;
+string LatestHash = string.Empty;
+
 class BuildState {
     public string Version { get; set; }
+    public string Hash { get; set; }
 }
-
-bool GracefullyAbort;
-string LatestVersion = string.Empty;
-Uri LatestZip = null;
-BuildState State = null;
-
 
 Task("Load State")
     .Does(() =>
@@ -31,6 +35,7 @@ Task("Load State")
 
         Information("State loaded");
         Information($"Version: {State.Version}");
+        Information($"Hash: {State.Hash}");
     })
 ;
 
@@ -77,22 +82,58 @@ Task("Check Latest")
 
             if (State.Version == LatestVersion) {
                 Warning("Current version is the latest version");
+
+                if(Force) {
+                    Warning("Build is being forced, continue packing anyways.");
+                    return;
+                }
+
                 GracefullyAbort = true;
+            }
+            else if (SkipHash)
+            {
+                // new version so don't skip hash calculation next
+                Warning("New version found, cannot skip hash calculation.");
+                SkipHash = false;
             }
         }
     })
 ;
 
+Task("Get Latest Hash")
+    .WithCriteria( () => !GracefullyAbort)
+    .IsDependentOn("Check Latest")
+    .Does(() =>
+    {
+        if (SkipHash && !string.IsNullOrEmpty(State.Hash))
+        {
+            Warning($"Skipping hash calculation, re-using hash from state: {State.Hash}");
+            LatestHash = State.Hash;
+            return;
+        }
+        else if (SkipHash)
+        {
+            Information("State does not contain a hash, ignoring SkipHash flag");
+        }
+
+        var resource = DownloadFile(LatestZip.ToString());
+
+        LatestHash = CalculateFileHash(resource.FullPath).ToHex();
+        Information($"Zip file SHA256 hash: {LatestHash}");
+    })
+;
+
 Task("Run Pack")
     .WithCriteria( () => !GracefullyAbort )
-    .IsDependentOn("Check Latest")
+    .IsDependentOn("Get Latest Hash")
     .Does(() =>
     {
         CakeExecuteScript("./pack.cake", new CakeSettings {
             Arguments = new Dictionary<string, string>
             {
                 { "latestUrl", LatestZip.ToString() },
-                { "packageVersion", LatestVersion }
+                { "packageVersion", LatestVersion },
+                { "latestHash", LatestHash }
             }
             ,ArgumentCustomization = builder => {
                 builder.Append("-experimental");
@@ -107,6 +148,7 @@ Task("Save State")
     .Does(() =>
     {
         State.Version = LatestVersion;
+        State.Hash = LatestHash;
 
         SerializeJsonToFile("./state.json", State);
     })
@@ -117,6 +159,7 @@ Task("Default")
     .Does( () => {
         Information($"Current Version: {State.Version}");
         Information($"Latest Version: {LatestVersion}");
+        Information($"Latest Hash: {LatestHash}");
         Information($"Latest Zip: {LatestZip}");
     })
     .OnError(exception =>
